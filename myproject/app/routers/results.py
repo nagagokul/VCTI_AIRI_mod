@@ -23,7 +23,7 @@ def get_results(
         db.query(models.Resume, models.ScreenResult)
         .join(models.ScreenResult, models.Resume.resume_id == models.ScreenResult.resume_id)
         .filter(models.ScreenResult.jd_id == jd.jd_id)
-        .order_by(models.ScreenResult.match_score.desc())
+        .order_by(models.ScreenResult.match_score.desc(), models.ScreenResult.created_at.desc())
         .limit(top_n)
         .all()
     )
@@ -32,15 +32,16 @@ def get_results(
 
     for resume, result in results:
         response.append({
+            "resume_id": str(resume.resume_id),
             "candidate_name": resume.name,
             "resume_name": str(resume.resume_id),
             "score": result.match_score,
             "skills_match": result.skills_match.split(",") if result.skills_match else [],
             "experience": float(resume.years_of_experience) if resume.years_of_experience is not None else None,
-            "summary": result.summary
+            "summary": result.summary,
         })
 
     return {
         "requirement_id": requirement_id,
-        "results": response
+        "results": response,
     }

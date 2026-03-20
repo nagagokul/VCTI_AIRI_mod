@@ -2,6 +2,7 @@ from collections import defaultdict
 from sqlalchemy import select
 from ...database import SessionLocal
 from ...models import Resume, ResumeChunk, JobDescription
+from ..core.resume_deduplication import FINGERPRINT_SECTION
 from ..ai.embedding.embedding_service import get_embedding_provider
 
 
@@ -115,6 +116,7 @@ class ResumeRetriever:
                     similarity.label("similarity")
                 )
                 .where(ResumeChunk.resume_id.in_(resume_ids))
+                .where(ResumeChunk.section != FINGERPRINT_SECTION)
             )
 
             rows = db.execute(stmt).all()
@@ -163,6 +165,7 @@ class ResumeRetriever:
                 )
                 .join(ResumeChunk)
                 .where(Resume.resume_id.in_(resume_ids))
+                .where(ResumeChunk.section != FINGERPRINT_SECTION)
                 .order_by(Resume.resume_id, ResumeChunk.section)
             )
 
