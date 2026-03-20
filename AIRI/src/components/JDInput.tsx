@@ -5,28 +5,27 @@ interface Props {
 }
 
 export default function JDInput({ onSubmit }: Props) {
-  const [requirementId, setRequirementId] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [skills, setSkills] = useState("");
   const [experience, setExperience] = useState("");
 
   const handleSubmit = () => {
-    if (!requirementId || !title || !description) return;
-
-    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    if (!title || !description) return;
 
     const jdData = {
       requirement_id: `REQ-${Date.now()}`,
-      user_id: user.id,
       job_title: title,
       job_description: description,
       experience_level: experience,
-      required_skills: skills.split(",").map((s) => s.trim()),
+      required_skills: skills
+        .split(",")
+        .map((skill) => skill.trim())
+        .filter(Boolean),
     };
+
     onSubmit(jdData);
 
-    setRequirementId("");
     setTitle("");
     setDescription("");
     setSkills("");
@@ -91,7 +90,7 @@ export default function JDInput({ onSubmit }: Props) {
       <button
         onClick={handleSubmit}
         className="bg-blue-600 hover:bg-blue-700 px-5 py-2 rounded text-white"
-        disabled={!requirementId || !title || !description}
+        disabled={!title || !description}
       >
         Save Job Description
       </button>
