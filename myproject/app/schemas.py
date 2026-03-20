@@ -40,7 +40,7 @@ class JobDescriptionCreate(BaseModel):
     required_skills: List[str]
 
 class JobDescriptionOut(BaseModel):
-    id: int
+    jd_id: int
     requirement_id: str
     job_title: str
     job_description: str
