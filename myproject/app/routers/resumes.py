@@ -1,5 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
-from typing import List
+from typing import List, Optional
 from sqlalchemy.orm import Session
 from ..database import get_db
 from .. import models
@@ -11,7 +11,13 @@ import json
 
 from ..services.pipeline.chain_builder import ResumePipelineBuilder
 from ..services.core.resume_db_mapper import map_to_db_models
-from ..services.core.resume_deduplication import upsert_resume_from_json
+from ..services.core.resume_deduplication import (
+    FINGERPRINT_SECTION,
+    build_fingerprint_payload,
+    build_resume_canonical_text,
+    decide_resume_action,
+    fingerprint_to_content,
+)
 from ..routers.screening import refresh_screening_results
 
 router = APIRouter(prefix="/resumes", tags=["Resumes"])
@@ -60,24 +66,73 @@ def upload_resumes(
         with open(json_path, "w", encoding="utf-8") as handle:
             json.dump(resume_json, handle, ensure_ascii=False, indent=4)
 
-        result = upsert_resume_from_json(
-            db=db,
-            jd=jd,
-            file_name=file.filename,
-            resume_json=resume_json,
-            mapper=map_to_db_models,
-        )
+        resume, chunks = map_to_db_models(resume_json)
+        canonical_text = build_resume_canonical_text(resume_json)
+        fingerprint = build_fingerprint_payload(canonical_text)
+        decision = decide_resume_action(db, resume, fingerprint)
 
-        if result["action"] == "duplicate":
-            duplicates.append(result["duplicate"])
+        if decision.action == "duplicate":
+            duplicates.append({
+                "file_name": file.filename,
+                "existing_resume_id": str(decision.existing_resume.resume_id) if decision.existing_resume else None,
+                "similarity": round(decision.similarity, 4),
+                "message": "Duplicate resume rejected",
+            })
             continue
 
-        if result["action"] == "created":
-            uploaded.append(result["resume_id"])
-        else:
-            updated.append(result["resume_id"])
+        target_resume: Optional[models.Resume] = decision.existing_resume
+        action = "created"
 
-        refresh_candidates.append(result["refresh_resume_id"])
+        if target_resume is None:
+            target_resume = models.Resume()
+            db.add(target_resume)
+            db.flush()
+        else:
+            action = "updated"
+            (
+                db.query(models.ScreenResult)
+                .filter(
+                    models.ScreenResult.resume_id == target_resume.resume_id,
+                    models.ScreenResult.jd_id == jd.jd_id,
+                )
+                .delete(synchronize_session=False)
+            )
+            (
+                db.query(models.ResumeChunk)
+                .filter(models.ResumeChunk.resume_id == target_resume.resume_id)
+                .delete(synchronize_session=False)
+            )
+
+        target_resume.name = resume.name
+        target_resume.email = resume.email
+        target_resume.phone = resume.phone
+        target_resume.linkedin = resume.linkedin
+        target_resume.github = resume.github
+        target_resume.location = resume.location
+        target_resume.years_of_experience = resume.years_of_experience
+        db.flush()
+
+        for chunk in chunks:
+            db.add(models.ResumeChunk(
+                resume_id=target_resume.resume_id,
+                section=chunk.section,
+                content=chunk.content,
+                embedding=chunk.embedding,
+            ))
+
+        db.add(models.ResumeChunk(
+            resume_id=target_resume.resume_id,
+            section=FINGERPRINT_SECTION,
+            content=fingerprint_to_content(fingerprint),
+            embedding=None,
+        ))
+
+        if action == "created":
+            uploaded.append(str(target_resume.resume_id))
+        else:
+            updated.append(str(target_resume.resume_id))
+
+        refresh_candidates.append(str(target_resume.resume_id))
 
     db.commit()
 
