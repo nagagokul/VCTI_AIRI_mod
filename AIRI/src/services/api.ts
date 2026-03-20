@@ -19,7 +19,7 @@ export type ResumeUploadResponse = {
 export const uploadJD = async (data: any) => {
   const token = localStorage.getItem("access_token");
 
-  const res = await fetch(`${API_BASE}/jd`, {
+  const res = await fetch(`${API_BASE}/jd/`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
