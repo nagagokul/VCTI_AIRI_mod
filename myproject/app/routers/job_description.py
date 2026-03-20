@@ -34,7 +34,7 @@ def upload_jd(
 def get_user_jds(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
 
     jds = db.query(models.JobDescription).filter(
-        models.JobDescription.user_id == current_user.id
+        models.JobDescription.user_id == current_user.user_id
     ).all()
 
     return [schemas.JobDescriptionOut.model_validate(jd) for jd in jds]

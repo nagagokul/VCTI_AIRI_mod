@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, Form, Depends
+from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException
 from typing import List
 from sqlalchemy.orm import Session
 from ..database import get_db
@@ -11,6 +11,8 @@ import json
 
 from ..services.pipeline.chain_builder import ResumePipelineBuilder
 from ..services.core.resume_db_mapper import map_to_db_models
+from ..services.core.resume_deduplication import upsert_resume_from_json
+from ..routers.screening import refresh_screening_results
 
 router = APIRouter(prefix="/resumes", tags=["Resumes"])
 UPLOAD_DIR = "app/uploads/resumes"
@@ -25,80 +27,72 @@ def upload_resumes(
     resumes: List[UploadFile] = File(...),
     db: Session = Depends(get_db)
 ):
-    # reset for every  upload to track current upload
-    uploaded = []  
+    uploaded: list[str] = []
+    updated: list[str] = []
+    duplicates: list[dict] = []
+    refresh_candidates: list[str] = []
 
-    # llm parsing chain
-    resume_pipeline  = ResumePipelineBuilder().build_structure_json_pipeline()
-    
-    
+    jd = db.query(models.JobDescription).filter(
+        models.JobDescription.requirement_id == requirement_id
+    ).first()
+    if not jd:
+        raise HTTPException(status_code=404, detail="Job description not found")
+
+    resume_pipeline = ResumePipelineBuilder().build_structure_json_pipeline()
+
     for file in resumes:
-        uid =uuid.uuid4()
+        uid = uuid.uuid4()
         unique_name = f"{uid}_{file.filename}"
         file_path = os.path.join(UPLOAD_DIR, unique_name)
 
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
 
-        #  llm json out
         raw_output = resume_pipeline.invoke({"path": file_path})
         resume_json = raw_output.get("filled_resume")
-
 
         json_name = f"{uid}_{Path(file.filename).stem}.json"
         json_path = os.path.join(JSON_DIR, json_name)
 
-
         if not resume_json:
-            raise ValueError(f"Pipeline returned empty result for: {file.filename}")
-        else:
-            with open(json_path, 'w', encoding='utf-8') as f:
-                json.dump(resume_json, f, ensure_ascii=False, indent=4)
+            raise HTTPException(status_code=422, detail=f"Pipeline returned empty result for: {file.filename}")
 
-        # resume_json mapped with pydantic Resume 
-        resume, chunks = map_to_db_models(resume_json)
+        with open(json_path, "w", encoding="utf-8") as handle:
+            json.dump(resume_json, handle, ensure_ascii=False, indent=4)
 
-        resume_db = models.Resume(
-            name = resume.name,
-            email = resume.email,
-            phone = resume.phone,
-            linkedin = resume.linkedin,
-            github = resume.github,
-            location = resume.location,
-            years_of_experience = resume.years_of_experience  
+        result = upsert_resume_from_json(
+            db=db,
+            jd=jd,
+            file_name=file.filename,
+            resume_json=resume_json,
+            mapper=map_to_db_models,
         )
 
-        db.add(resume_db)
-        db.flush()  # DB assigns resume_id 
+        if result["action"] == "duplicate":
+            duplicates.append(result["duplicate"])
+            continue
 
-        for chunk in chunks:
-            db.add(models.ResumeChunk(
-                resume_id = resume_db.resume_id,
-                section = chunk.section,
-                content = chunk.content,
-                embedding = chunk.embedding
-            ))
-        uploaded.append(str(resume_db.resume_id))
+        if result["action"] == "created":
+            uploaded.append(result["resume_id"])
+        else:
+            updated.append(result["resume_id"])
+
+        refresh_candidates.append(result["refresh_resume_id"])
+
     db.commit()
 
+    refreshed_results = []
+    if refresh_candidates:
+        refreshed_results = refresh_screening_results(
+            db=db,
+            jd=jd,
+            resume_ids=refresh_candidates,
+        )
+
     return {
-        "uploaded": uploaded
+        "uploaded": uploaded,
+        "updated": updated,
+        "duplicates": duplicates,
+        "screening_refreshed_for": refresh_candidates,
+        "screening_results": refreshed_results,
     }
-
-
-"""
-we aren't savind data in db ?
-so, not  retreivable via resume_id/candidate id.
-"""
-# @router.get("/resume/{resume_id}/download")
-# def download_resume(resume_id: int, db: Session = Depends(get_db)):
-
-#     resume_record = db.query(models.Resume).filter(
-#         models.Resume.resume_id == resume_id
-#     ).first()
-
-#     # NOTE: db model does not contain file path so using a placeholder property, 
-#     # but querying the Resume table as requested.
-#     path = f"app/uploads/resumes/{getattr(resume_record, 'resume_filename', 'unknown.pdf')}"
-
-#     return FileResponse(path, filename=candidate.resume_filename)
