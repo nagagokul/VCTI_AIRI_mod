@@ -90,7 +90,7 @@ def map_to_db_models(data: dict, embedding_model=None):
     Blank or invalid contact fields are normalized to None so OCR/parser noise
     does not break resume ingestion.
     """
-    embedding = get_embedding_provider()
+    embedding = embedding_model or get_embedding_provider()
     personal = data.get("personal_info", {})
 
     experiences = data.get("experience", [])
