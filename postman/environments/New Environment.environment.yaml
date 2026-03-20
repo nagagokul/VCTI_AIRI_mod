@@ -1,0 +1,11 @@
+name: New Environment
+values:
+  - key: base_url
+    value: ''
+    enabled: true
+  - key: access_token
+    value: ''
+    enabled: true
+  - key: 'requirement_id '
+    value: ''
+    enabled: true
