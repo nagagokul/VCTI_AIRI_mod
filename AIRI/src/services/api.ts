@@ -1,9 +1,25 @@
 export const API_BASE = "http://127.0.0.1:8000";
 
+export type ResumeUploadResponse = {
+  uploaded: string[];
+  updated: string[];
+  duplicates: Array<{
+    file_name: string;
+    existing_resume_id?: string | null;
+    similarity: number;
+    message: string;
+  }>;
+  screening_refreshed_for: string[];
+  screening_results: Array<{
+    candidate: string;
+    score: number;
+  }>;
+};
+
 export const uploadJD = async (data: any) => {
   const token = localStorage.getItem("access_token");
 
-  const res = await fetch(`${API_BASE}/jd`, {
+  const res = await fetch(`${API_BASE}/jd/`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -28,8 +44,6 @@ export const getUserJDs = async () => {
     },
   });
 
-  console.log("GET /jd/user response status:", res.status);
-
   if (!res.ok) {
     throw new Error("Failed to fetch JDs");
   }
@@ -37,16 +51,16 @@ export const getUserJDs = async () => {
   return res.json();
 };
 
-export const screenResumes = async (requirement_id: string) => {
+export const screenResumes = async (requirement_id: string, resume_ids?: string[]) => {
   const token = localStorage.getItem("access_token");
 
-  const res = await fetch(`${API_BASE}/resumes/upload`, {
+  const res = await fetch(`${API_BASE}/screen`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ requirement_id }),
+    body: JSON.stringify({ requirement_id, resume_ids }),
   });
 
   if (!res.ok) {
@@ -56,7 +70,7 @@ export const screenResumes = async (requirement_id: string) => {
   return res.json();
 };
 
-export const uploadResumes = async (formData: FormData) => {
+export const uploadResumes = async (formData: FormData): Promise<ResumeUploadResponse> => {
   const token = localStorage.getItem("access_token");
 
   const res = await fetch(`${API_BASE}/resumes/upload`, {
@@ -89,6 +103,7 @@ export const getResults = async (requirementId: string) => {
 
   return res.json();
 };
+
 export const downloadResume = async (resumeId: string) => {
   const token = localStorage.getItem("access_token");
 
